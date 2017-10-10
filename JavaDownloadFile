@@ -1,0 +1,405 @@
+package S3;
+
+import com.amazonaws.*;
+import com.amazonaws.auth.AWSStaticCredentialsProvider;
+import com.amazonaws.auth.BasicAWSCredentials;
+import com.amazonaws.client.builder.AwsClientBuilder;
+import com.amazonaws.event.ProgressListenerChain;
+import com.amazonaws.services.s3.model.*;
+import com.amazonaws.services.s3.transfer.Transfer.TransferState;
+import com.amazonaws.services.s3.AmazonS3;
+import com.amazonaws.services.s3.AmazonS3ClientBuilder;
+import com.amazonaws.services.s3.transfer.*;
+import com.amazonaws.services.s3.transfer.internal.S3ProgressListener;
+import com.amazonaws.services.s3.transfer.internal.S3ProgressListenerChain;
+import com.amazonaws.services.s3.transfer.internal.TransferProgressUpdatingListener;
+import org.apache.commons.io.FileUtils;
+import org.apache.jmeter.config.Arguments;
+import org.apache.jmeter.protocol.java.sampler.AbstractJavaSamplerClient;
+import org.apache.jmeter.protocol.java.sampler.JavaSamplerContext;
+import org.apache.jmeter.samplers.SampleResult;
+import com.amazonaws.event.ProgressEvent;
+import com.amazonaws.event.ProgressListener;
+
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+import static S3.ProgressBarFromS3.eraseProgressBar;
+import static S3.ProgressBarFromS3.printProgressBar;
+
+public class DownloadDirectoryJmeter extends AbstractJavaSamplerClient implements Serializable {
+    private static final long serialVersionUID = 1L;
+
+    @Override
+    public Arguments getDefaultParameters() {
+        Arguments defaultParameters = new Arguments();
+        defaultParameters.addArgument("bucketName", "");
+        defaultParameters.addArgument("keyId", "");
+        defaultParameters.addArgument("secretKey", "");
+        defaultParameters.addArgument("region", "");
+//        defaultParameters.addArgument("filePath", "");
+        defaultParameters.addArgument("proxyHost", "null");
+        defaultParameters.addArgument("proxyPort", "88");
+        defaultParameters.addArgument("endpoint", "");
+//        defaultParameters.addArgument("partSize", "");
+//        defaultParameters.addArgument("threshold", "");
+//        defaultParameters.addArgument("countFromDownload", "");
+
+        return defaultParameters;
+    }
+
+    @Override
+    public SampleResult runTest(JavaSamplerContext context) {
+        // pull parameters
+        String bucketName = context.getParameter("bucketName");
+        String keyId = context.getParameter("keyId");
+        String secretKey = context.getParameter("secretKey");
+        String region = context.getParameter("region");
+//        String filePath = context.getParameter("filePath");
+        String proxyHost = context.getParameter("proxyHost");
+        String proxyPort = context.getParameter("proxyPort");
+        String endpoint = context.getParameter("endpoint");
+//        String partSize = context.getParameter("partSize");
+//        String threshold = context.getParameter("threshold");
+//        String countFromDownload = context.getParameter("countFromDownload");
+
+        SampleResult result = new SampleResult();
+        result.sampleStart();
+        //String EndRes = endpoint + existingBucketName;
+        List<ProxyAuthenticationMethod> authMethods = Arrays.asList(
+                ProxyAuthenticationMethod.BASIC,
+                ProxyAuthenticationMethod.DIGEST,
+                ProxyAuthenticationMethod.KERBEROS,
+                ProxyAuthenticationMethod.NTLM,
+                ProxyAuthenticationMethod.SPNEGO);
+
+//Выноси переменные чтоб потом по коду не искать
+
+
+
+        // построение клиента S3
+        String existingBucketName = "";
+
+        BasicAWSCredentials awsCredentials = new BasicAWSCredentials(keyId, secretKey);
+        ClientConfiguration clientConfig = new ClientConfiguration();
+        clientConfig.setProtocol(Protocol.HTTP);
+        clientConfig.setProxyHost(proxyHost);
+        clientConfig.setProxyPort(Integer.parseInt(proxyPort));
+//        if ( clientConfig.getProxyHost() == "null"){
+//            clientConfig.setProxyHost(null);
+//        }
+//        if (clientConfig.getProxyHost() != null) {
+//            endpoint = endpoint + "/" + bucketName;
+//            bucketName = "";
+//        }
+        System.out.println(clientConfig.getProxyHost());
+        clientConfig.withProxyAuthenticationMethods(authMethods);
+        AwsClientBuilder.EndpointConfiguration endpoints = new AwsClientBuilder.EndpointConfiguration(endpoint, region);
+
+
+        AmazonS3 s3Client = AmazonS3ClientBuilder.standard()
+                .withEndpointConfiguration(endpoints)
+                .withRegion(region)
+                .withClientConfiguration(clientConfig)
+                .withCredentials(new AWSStaticCredentialsProvider(awsCredentials))
+                .withChunkedEncodingDisabled(false)
+                .build();
+
+        try {
+//            final ListObjectsV2Request req = new ListObjectsV2Request().withBucketName(bucketName).withMaxKeys(2);
+//            ListObjectsV2Result resultFromDelete;
+//            int i = 0;
+
+//            Long LongSize = Long.parseLong(partSize);
+//            Long TRSize = Long.parseLong(threshold);
+
+            TransferManager tm =  TransferManagerBuilder.standard()
+//                    .withMinimumUploadPartSize(LongSize)
+//                    .withMultipartUploadThreshold(TRSize)
+                    .withS3Client(s3Client)
+                    .build();
+//            GetObjectRequest reqvv = new GetObjectRequest(bucketName,"0002");
+//            S3Object objj = s3Client.getObject(reqvv);
+//            InputStream stream = objj.getObjectContent();
+
+
+            ListObjectsRequest listObjectsRequest = new ListObjectsRequest().withBucketName(bucketName);
+            ObjectListing objectListing = s3Client.listObjects(listObjectsRequest);
+            ArrayList<String> lines = new ArrayList<String>();
+
+            for (S3ObjectSummary s3ObjectSummary : objectListing.getObjectSummaries()) {
+                String file = s3ObjectSummary.getKey();
+                File ff = new File("E:\\\\TestDownload\\" + file);
+                //FileWriter fileWriter = new FileWriter(ff,true );
+                FileOutputStream outFile = new FileOutputStream(ff,true);
+                S3Object objectDownload = s3Client.getObject(new GetObjectRequest(bucketName,file));
+                InputStream objData = objectDownload.getObjectContent();
+                File newBufFile = new File("E:\\\\TestDownload\\buffer");
+                FileWriter sw = new FileWriter(ff,true);
+                if (ff.exists() && (ff.length() < s3ObjectSummary.getSize())){
+                   try {
+                       BufferedReader reader = new BufferedReader(new InputStreamReader(objData));
+                       String line = reader.readLine();
+                       while((line) != null){
+                           sw.write(line);
+                       }
+                   } catch (IOException ex){
+                       result.sampleEnd(); // stop stopwatch
+                       result.setSuccessful(false);
+                       result.setResponseMessage("Exception: " + ex);
+
+                       // get stack trace as a String to return as document data
+                       java.io.StringWriter stringWriter = new java.io.StringWriter();
+                       ex.printStackTrace(new java.io.PrintWriter(stringWriter));
+                       result.setDataType("text");
+                       result.setResponseCode("500");
+                   }
+
+
+
+
+//                    OutputStream outStream = new FileOutputStream(ff, true);
+//                    byte[] buffer = new byte[10048576];
+//                    ByteArrayOutputStream byteWriter = new ByteArrayOutputStream();
+//                    while (true){
+//                        int readBytesCount = objData.read(buffer);
+//                        if (readBytesCount == -1){
+//                            break;
+//                        }
+//                        if (readBytesCount > 0){
+//                            outStream.write(readBytesCount);
+//                        }
+//                    }
+//                    outStream.flush();
+//                    outStream.close();
+
+//                    OutputStream outStream = new FileOutputStream(ff, true);
+//                    outStream.write(objData.read());
+
+
+                    //FileUtils.copyInputStreamToFile(objData,fileWriter);
+
+
+//                    FileOutputStream fileOutputStream = new FileOutputStream(ff,true);
+//                    DataInputStream dis = new DataInputStream(new FileInputStream(ff);
+//                    ff.setWritable(true);
+//                    BufferedWriter writer = new BufferedWriter(new FileWriter(objData.toString()));
+//                    for (String line : lines) {
+//                        writer.append(line);
+//                        writer.newLine();
+//                    }
+//                    writer.flush();
+//                    writer.close();
+//
+//                    FileWriter sw = new FileWriter(ff,true);
+//                    sw.write(objData.read());
+//                    //FileUtils.copyInputStreamToFile(objData,newBufFile);
+
+                } else {
+                    if (s3ObjectSummary.getSize() > 0) {
+                        FileUtils.copyInputStreamToFile(objData,ff);
+
+                }
+                }
+//                    FileUtils.copyInputStreamToFile(objData,newBufFile);
+//                    try (FileOutputStream fos = new FileOutputStream(ff))  // FileOutputStream(ff))
+//                        {
+//
+//                            FileWriter writerToFile = new FileWriter()
+////                        byte[] bytesToWrite = newBufFile.;
+////                        fos.write(bytesToWrite);
+////                        fos.flush();
+////                        fos.close();
+////                        System.out.println("Запись в файл сделана.");
+////                    } catch (IOException ex2) {
+////                       System.out.println("ERROR " + ex2);
+//                    }
+//
+//                } else {
+//
+//
+//                }
+
+
+
+
+//                if (s3ObjectSummary.getSize() > 0) {
+//                    s3Client.getObject(
+//                           // objectRequest,
+//                            ff
+//                    );
+//                }
+            }
+               // S3Object objectPortion = s3Client.getObject(objectRequest);
+//            File fileNull = new File();
+//            final ListObjectsV2Request req = new ListObjectsV2Request().withBucketName(bucketName).withMaxKeys(2);
+//            ListObjectsV2Result resultFromDelete;
+//            long fileSize = 0;
+//            int i = 0;
+//
+//            do{
+//                i++;
+//                resultFromDelete = s3Client.listObjectsV2(req);
+//                for (S3ObjectSummary objectSummary: resultFromDelete.getObjectSummaries()){
+//                    String keyDowload = objectSummary.getKey();
+//                    fileSize = objectSummary.getSize();
+//                    TransferProgress transferProgress = new TransferProgress();
+//                    S3ProgressListenerChain listenerChain = new S3ProgressListenerChain(transferProgress);
+//
+//                    //String keyDel = objectSummary.getKey();
+////                    String keyDel = "0001";
+////                    fileSize = objectSummary.getSize();
+////                    System.out.println("NA posmotret = " + keyDel);
+////                    System.out.println(" Length or Dlina =" + fileSize);
+////                    File fileDownload = new File("E:\\TestDownload\\"+keyDel);
+////                    S3Object o = s3Client.getObject(bucketName, keyDel);
+////                    S3ObjectInputStream s3is = o.getObjectContent();
+////                    FileOutputStream fos = new FileOutputStream(fileDownload);
+////                    byte[] read_buf = new byte[10024];
+////                    int read_len = 0;
+////                    while ((read_len = s3is.read(read_buf)) > 0) {
+////                        fos.write(read_buf, 0, read_len);
+//                    }
+//                    s3is.close();
+//                    fos.close();
+
+                    //MultipleFileDownload muFD = tm.downloadDirectory(bucketName,keyDel,fileDownload);
+//                    S3Object muFD = s3Client.getObject(bucketName, keyDel);
+//                    muFD.getObjectContent().read();
+//                   // S3Object s3is = s3Client.getObject(new GetObjectRequest(bucketName,keyDel));
+//                            //muFD.getObjectContent();
+//                    InputStream it = muFD.getObjectContent();
+//                    FileOutputStream fos = new FileOutputStream(fileDownload);
+//                    byte[] read_buf = new byte[102400];
+//                    Long read_len =  fileSize;
+//                    while ((read_len = ((Long) it.read(read_buf))) > 0) {
+//                        fos.write(read_buf, , read_len);
+//                    }
+//                    muFD.close();
+//                    fos.close();
+                    // print an empty progress bar...
+//                    printProgressBar(0.0);
+//                    muFD.addProgressListener(new ProgressListener() {
+//                        public void progressChanged(ProgressEvent e) {
+//                            double pct = e.getBytesTransferred() * 100.0 / e.getBytes();
+//                            eraseProgressBar();
+//                            printProgressBar(pct);
+//                        }
+//                    });
+//                    TransferState xfer_state = muFD.getState();
+//                    System.out.println(": " + xfer_state);
+//
+//                    Long sizeFile = muFD.getProgress().getTotalBytesToTransfer();
+//
+//                    System.out.println("Total Size From File " + sizeFile);
+//                    System.out.println(muFD.getObjectMetadata());
+//                    System.out.println("What download NOW =" + muFD);
+//                    muFD.isDone();
+//                    tm.shutdownNow();
+//                    s3Client.shutdown();
+//
+//                }
+//
+//           }while(i <= 10);
+
+
+
+
+            //s3Client.shutdown();
+            tm.shutdownNow();
+            s3Client.shutdown();
+
+
+
+//            Upload upload = tm.upload(
+//                    existingBucketName, bucketName, new File(filePath)
+//            );
+
+
+//
+//            do{
+//                resultFromDelete = s3Client.listObjectsV2(req);
+//                for (S3ObjectSummary objectSummary: resultFromDelete.getObjectSummaries()){
+//                    i ++;
+//                    String keyDel = bucketName  + objectSummary.getKey();
+//
+//                    s3Client.deleteObject(bucketName,keyDel);
+//                }
+//
+//            }while(i <= Integer.parseInt(countDelete));
+
+            // TransferManager tm = new TransferManager(s3Client);
+
+
+//            Long LongSize = Long.parseLong(partSize);
+//            Long TRSize = Long.parseLong(threshold);
+//
+//            TransferManager tm = TransferManagerBuilder.standard()
+//                    .withMinimumUploadPartSize(LongSize)
+//                    .withMultipartUploadThreshold(TRSize)
+//                    .withS3Client(s3Client)
+//                    .build();
+//
+//            Upload upload = tm.upload(
+//                    existingBucketName, bucketName, new File(filePath)
+//            );
+//            upload.waitForCompletion();
+//            System.out.println("UploadFileJmeter complete.");
+//            tm.shutdownNow();
+
+
+            result.sampleEnd();
+            result.setSuccessful(true);
+
+//            if (meta != null) {
+//                result.setResponseMessage("OK on url:" + existingBucketName + "/" + bucketName + ". Length=" + meta.getContentLength());
+//            } else {
+//                result.setResponseMessage("OK on url:" + existingBucketName + "/" + bucketName + ".No metadata");
+//            }
+            result.setResponseCodeOK();
+        } catch (AmazonServiceException ase) {
+            System.err.println(ase.getMessage());
+            ase.printStackTrace(System.err);
+            System.out.println("Caught an AmazonServiceException, which " +
+                    "means your request made it " +
+                    "to Amazon S3, but was rejected with an error response" +
+                    " for some reason.");
+            System.out.println("Error Message:    " + ase.getMessage());
+            System.out.println("HTTP Status Code: " + ase.getStatusCode());
+            System.out.println("AWS Error Code:   " + ase.getErrorCode());
+            System.out.println("Error Type:       " + ase.getErrorType());
+            System.out.println("Request ID:       " + ase.getRequestId());
+            System.exit(1);
+
+        } catch (AmazonClientException err) {
+            System.err.println(err.getMessage());
+            err.printStackTrace(System.err);
+            System.out.println("Caught an AmazonClientException, which " +
+                    "means the client encountered " +
+                    "an internal error while trying to " +
+                    "communicate with S3, " +
+                    "such as not being able to access the network.");
+            System.out.println("Error Message: " + err.getMessage());
+            System.exit(1);
+
+        } catch (Exception e) {
+            result.sampleEnd(); // stop stopwatch
+            result.setSuccessful(false);
+            result.setResponseMessage("Exception: " + e);
+
+            // get stack trace as a String to return as document data
+            java.io.StringWriter stringWriter = new java.io.StringWriter();
+            e.printStackTrace(new java.io.PrintWriter(stringWriter));
+            result.setDataType("text");
+            result.setResponseCode("500");
+        }
+
+        return result;
+    }
+
+
+    }
